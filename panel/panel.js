@@ -53,10 +53,37 @@ const state = {
 
 const view = document.getElementById('view');
 const engine = new Engine('../engine/stockfish-18-lite-single.js');
-engine.onError = (e) => {
-  state.engineError = 'Не удалось запустить Stockfish: ' + (e.message || 'ошибка загрузки');
+engine.onError = async (e) => {
+  state.engineError = 'Не удалось запустить Stockfish. Собираю диагностику…';
+  render();
+  state.engineError = await diagnoseEngine(e);
   render();
 };
+
+// Подробности о причине сбоя движка: доступность файлов, поддержка WebAssembly, вывод worker.
+async function diagnoseEngine(err) {
+  const lines = ['Не удалось запустить Stockfish.'];
+  lines.push('Ошибка: ' + ((err && (err.message || err.type)) || '(без сообщения)') + (err && err.filename ? ` в ${err.filename}:${err.lineno}` : ''));
+  for (const f of ['engine/stockfish-18-lite-single.js', 'engine/stockfish-18-lite-single.wasm']) {
+    try {
+      const r = await fetch(chrome.runtime.getURL(f));
+      const b = await r.arrayBuffer();
+      lines.push(`${f}: HTTP ${r.status}, ${b.byteLength} байт`);
+    } catch (e2) {
+      lines.push(`${f}: не читается (${e2.message})`);
+    }
+  }
+  lines.push('WebAssembly: ' + (typeof WebAssembly === 'object' ? 'поддерживается' : 'НЕТ'));
+  try {
+    const simd = WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]));
+    lines.push('WASM SIMD: ' + (simd ? 'да' : 'НЕТ (нужен более новый Chrome)'));
+  } catch (e3) {
+    lines.push('WASM SIMD: проверка не удалась');
+  }
+  if (engine.log && engine.log.length) lines.push('Вывод движка: ' + engine.log.slice(-5).join(' | '));
+  lines.push('Браузер: ' + navigator.userAgent);
+  return lines.join('\n');
+}
 
 // ---------- Обмен с контент-скриптом ----------
 
@@ -68,6 +95,7 @@ window.addEventListener('message', (e) => {
   if (e.origin !== PARENT_ORIGIN || e.source !== window.parent) return;
   const msg = e.data || {};
   if (msg.type === 'game') onGame(msg);
+  else if (msg.type === 'scale') document.documentElement.style.zoom = String(msg.scale || 1);
 });
 
 // ---------- Текущая партия ----------
@@ -466,7 +494,7 @@ function lastMoveInfo() {
 
 function renderGame() {
   const g = state.game;
-  if (state.engineError) return `<div class="card danger">${esc(state.engineError)}</div>`;
+  if (state.engineError) return `<div class="card danger"><pre class="diag">${esc(state.engineError)}</pre><button class="btn" data-action="reload-panel">Перезапустить панель</button> <span class="small">Скопируйте текст выше и пришлите его для исправления.</span></div>`;
   if (!g) return `<div class="card"><span class="spinner"></span>Жду партию на странице lichess…</div>`;
   if (state.error) return `<div class="card warn">${esc(state.error)}</div>`;
   const chess = state.chess;

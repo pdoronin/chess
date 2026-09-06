@@ -96,6 +96,8 @@
       <div class="cc-head">
         <span class="cc-title">♞ Тренер</span>
         <span class="cc-status"></span>
+        <button class="cc-btn cc-zoom-out" title="Уменьшить панель">A−</button>
+        <button class="cc-btn cc-zoom-in" title="Увеличить панель">A+</button>
         <button class="cc-btn cc-min" title="Свернуть">–</button>
       </div>
       <iframe class="cc-frame" allow="" title="Шахматный тренер"></iframe>`;
@@ -113,10 +115,15 @@
       }
     } catch (e) { /* ignore */ }
 
+    root.querySelector('.cc-zoom-out').addEventListener('click', () => setScale(scale - 0.1));
+    root.querySelector('.cc-zoom-in').addEventListener('click', () => setScale(scale + 0.1));
+    applyScale();
+
     root.querySelector('.cc-min').addEventListener('click', () => {
       collapsed = !collapsed;
       root.classList.toggle('cc-collapsed', collapsed);
       root.querySelector('.cc-min').textContent = collapsed ? '+' : '–';
+      applyScale();
     });
 
     // Перетаскивание за заголовок
@@ -146,6 +153,26 @@
     });
   }
 
+  // Масштаб панели: ширина контейнера и zoom содержимого iframe
+  let scale = 1;
+  try {
+    const s = parseFloat(localStorage.getItem('chess-coach-scale'));
+    if (s >= 0.6 && s <= 2) scale = s;
+  } catch (e) { /* ignore */ }
+
+  function setScale(v) {
+    scale = Math.round(Math.max(0.6, Math.min(2, v)) * 10) / 10;
+    try { localStorage.setItem('chess-coach-scale', String(scale)); } catch (e) { /* ignore */ }
+    applyScale();
+  }
+
+  function applyScale() {
+    if (!root) return;
+    root.style.width = collapsed ? '' : Math.round(360 * scale) + 'px';
+    iframe.style.height = Math.round(560 * scale) + 'px';
+    postToPanel({ type: 'scale', scale });
+  }
+
   function postToPanel(msg) {
     if (!iframe || !iframe.contentWindow) return;
     iframe.contentWindow.postMessage(msg, EXT_ORIGIN);
@@ -156,6 +183,7 @@
     const msg = e.data || {};
     if (msg.type === 'ready') {
       panelReady = true;
+      postToPanel({ type: 'scale', scale });
       if (lastPayload) postToPanel({ type: 'game', ...lastPayload });
     } else if (msg.type === 'arrows') {
       drawArrows(msg.shapes || []);

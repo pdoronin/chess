@@ -24,9 +24,19 @@ function parseInfo(line) {
 
 export class Engine {
   constructor(url) {
-    this.worker = new Worker(url);
+    this.log = [];
+    try {
+      this.worker = new Worker(url);
+    } catch (e) {
+      this.worker = null;
+      setTimeout(() => this.onError && this.onError(e), 0);
+      this.ready = new Promise(() => {});
+      this.queue = Promise.resolve();
+      return;
+    }
     this.worker.onmessage = (e) => this._line(String(e.data));
     this.worker.onerror = (e) => this.onError && this.onError(e);
+    this.worker.onmessageerror = (e) => this.onError && this.onError(e);
     this.ready = new Promise((r) => (this._readyResolve = r));
     this.current = null;
     this.queue = Promise.resolve();
@@ -36,10 +46,14 @@ export class Engine {
   }
 
   send(cmd) {
-    this.worker.postMessage(cmd);
+    if (this.worker) this.worker.postMessage(cmd);
   }
 
   _line(line) {
+    if (!line.startsWith('info ') && !line.startsWith('bestmove')) {
+      this.log.push(line);
+      if (this.log.length > 20) this.log.shift();
+    }
     if (line === 'uciok') {
       this.send('setoption name UCI_AnalyseMode value true');
       this.send('isready');

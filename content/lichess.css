@@ -30,7 +30,8 @@
   background: rgba(255, 255, 255, 0.2);
   border: none;
   color: #fff;
-  width: 24px;
+  min-width: 24px;
+  padding: 0 4px;
   height: 22px;
   border-radius: 4px;
   cursor: pointer;
@@ -47,7 +48,7 @@
   display: block;
 }
 #chess-coach-root.cc-collapsed .cc-frame { display: none; }
-#chess-coach-root.cc-collapsed { width: 200px; }
+#chess-coach-root.cc-collapsed { width: 240px !important; }
 #chess-coach-root.cc-dragging { opacity: 0.85; }
 
 .cg-wrap svg.cc-arrows,
@@ -60,3 +61,4 @@ cg-container svg.cc-arrows {
   pointer-events: none;
   z-index: 5;
 }
+#chess-coach-root .cc-zoom-in, #chess-coach-root .cc-zoom-out { font-size: 12px; font-weight: 700; }
