@@ -25,28 +25,41 @@ function parseInfo(line) {
 export class Engine {
   constructor(url) {
     this.log = [];
-    try {
-      this.worker = new Worker(url);
-    } catch (e) {
-      this.worker = null;
-      setTimeout(() => this.onError && this.onError(e), 0);
-      this.ready = new Promise(() => {});
-      this.queue = Promise.resolve();
-      return;
-    }
-    this.worker.onmessage = (e) => this._line(String(e.data));
-    this.worker.onerror = (e) => this.onError && this.onError(e);
-    this.worker.onmessageerror = (e) => this.onError && this.onError(e);
+    this.worker = null;
+    this.pending = [];
     this.ready = new Promise((r) => (this._readyResolve = r));
     this.current = null;
     this.queue = Promise.resolve();
     this.latest = 0;
     this.multipv = 1;
-    this.send('uci');
+    this._boot(url).catch((e) => {
+      this.worker = null;
+      this.onError && this.onError(e);
+    });
+  }
+
+  // Worker создаётся из Blob: lichess отдаёт Cross-Origin-Embedder-Policy,
+  // и прямой запрос скрипта воркера из iframe расширения блокируется
+  // (net::ERR_BLOCKED_BY_RESPONSE). Путь к .wasm передаём через hash.
+  async _boot(url) {
+    const jsUrl = new URL(url, import.meta.url).href;
+    const wasmUrl = jsUrl.replace(/\.js$/i, '.wasm');
+    const res = await fetch(jsUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status} при загрузке ${jsUrl}`);
+    const blob = new Blob([await res.text()], { type: 'text/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob) + '#' + encodeURIComponent(wasmUrl));
+    worker.onmessage = (e) => this._line(String(e.data));
+    worker.onerror = (e) => this.onError && this.onError(e);
+    worker.onmessageerror = (e) => this.onError && this.onError(e);
+    this.worker = worker;
+    worker.postMessage('uci');
+    const pending = this.pending; this.pending = [];
+    for (const cmd of pending) worker.postMessage(cmd);
   }
 
   send(cmd) {
     if (this.worker) this.worker.postMessage(cmd);
+    else this.pending.push(cmd);
   }
 
   _line(line) {
