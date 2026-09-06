@@ -193,8 +193,8 @@
     });
     window.addEventListener('mousemove', (e) => {
       if (!resize) return;
-      size.w = Math.round((resize.w + e.clientX - resize.x) / scale);
-      size.h = Math.round((resize.h + e.clientY - resize.y) / scale);
+      size.w = Math.round(resize.w + e.clientX - resize.x);
+      size.h = Math.round(resize.h + e.clientY - resize.y);
       clampSize();
       applyScale();
     });
@@ -206,18 +206,18 @@
     });
   }
 
-  // Размер панели (в «единицах» при масштабе 1), меняется ручкой в углу
+  // Размер панели в пикселях, меняется ручкой в углу. Независим от масштаба A−/A+.
   const size = { w: 360, h: 560 };
   try {
     const saved = JSON.parse(localStorage.getItem('chess-coach-size') || 'null');
     if (saved && typeof saved.w === 'number' && typeof saved.h === 'number') Object.assign(size, saved);
   } catch (e) { /* ignore */ }
   function clampSize() {
-    size.w = Math.max(240, Math.min(Math.round((window.innerWidth - 20) / scale), size.w));
-    size.h = Math.max(200, Math.min(Math.round((window.innerHeight - 80) / scale), size.h));
+    size.w = Math.max(240, Math.min(window.innerWidth - 20, size.w));
+    size.h = Math.max(200, Math.min(window.innerHeight - 80, size.h));
   }
 
-  // Масштаб панели: ширина контейнера и zoom содержимого iframe
+  // Масштаб содержимого панели (zoom внутри iframe); размер окна не трогает
   let scale = 1;
   try {
     const s = parseFloat(localStorage.getItem('chess-coach-scale'));
@@ -233,8 +233,8 @@
   function applyScale() {
     if (!root) return;
     clampSize();
-    root.style.width = collapsed ? '' : Math.round(size.w * scale) + 'px';
-    iframe.style.height = Math.round(size.h * scale) + 'px';
+    root.style.width = collapsed ? '' : size.w + 'px';
+    iframe.style.height = size.h + 'px';
     postToPanel({ type: 'scale', scale });
   }
 
