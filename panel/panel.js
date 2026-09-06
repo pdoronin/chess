@@ -661,6 +661,16 @@ function renderReview() {
     <div class="status">${scoreWhite ? esc(scoreWords(scoreWhite)) : ''}${liveBusy() ? ' · движок занят текущей партией' : r.done ? ' · глубина ' + r.depth : state.settings.reviewAnalyze && !chess.isGameOver() ? ` · <span class="spinner"></span>считаю…` : ''}</div>
   </div>`;
 
+  // Список ходов — сразу под доской, чтобы был виден без прокрутки.
+  const cells = [];
+  for (let i = 0; i < g.moves.length; i++) {
+    const rr = (g.records || []).find((x) => x.ply === i);
+    const col = rr ? QUALITY[rr.quality].color : '#999';
+    const mark = rr && (rr.quality === 'inaccuracy' || rr.quality === 'mistake' || rr.quality === 'blunder') ? QUALITY[rr.quality].icon : '';
+    cells.push(`${i % 2 === 0 ? `<span class="num">${i / 2 + 1}.</span>` : ''}<span class="mv ${i + 1 === r.ply ? 'cur' : ''}" data-review-go="${i + 1}" style="border-bottom:2px solid ${col}">${esc(g.moves[i])}${mark}</span>`);
+  }
+  html += `<div class="card movelist">${cells.join(' ')}</div>`;
+
   if (rec) {
     html += feedbackHtml(rec, rec.mine ? 'Ваш ход в этой позиции' : 'Ход соперника в этой позиции');
     if (rec.bestPv && rec.bestPv.length) html += `<div class="card small"><b>Линия движка во время партии:</b> ${esc(pvToSan(fen, rec.bestPv, 8).join(' '))}</div>`;
@@ -670,15 +680,6 @@ function renderReview() {
   }
   if (chess.isGameOver()) html += `<div class="card">${chess.isCheckmate() ? 'Мат.' : 'Партия окончена.'}</div>`;
 
-  // список ходов
-  const cells = [];
-  for (let i = 0; i < g.moves.length; i++) {
-    const rr = (g.records || []).find((x) => x.ply === i);
-    const col = rr ? QUALITY[rr.quality].color : '#999';
-    const mark = rr && (rr.quality === 'inaccuracy' || rr.quality === 'mistake' || rr.quality === 'blunder') ? QUALITY[rr.quality].icon : '';
-    cells.push(`${i % 2 === 0 ? `<span class="num">${i / 2 + 1}.</span>` : ''}<span class="mv ${i + 1 === r.ply ? 'cur' : ''}" data-review-go="${i + 1}" style="border-bottom:2px solid ${col}">${esc(g.moves[i])}${mark}</span>`);
-  }
-  html += `<div class="card movelist">${cells.join(' ')}</div>`;
   html += summaryHtml(g.records || []).replace(/<div style="margin-top:8px"><button class="btn primary" data-action="review-current">[^<]*<\/button><\/div>/, '');
   return html;
 }
@@ -740,6 +741,8 @@ function render() {
   else if (state.tab === 'lessons') view.innerHTML = renderLessons();
   else view.innerHTML = renderSettings();
   view.scrollTop = scroll;
+  const cur = view.querySelector('.movelist .mv.cur');
+  if (cur) cur.scrollIntoView({ block: 'nearest' });
   sendArrows();
   sendStatus();
 }
