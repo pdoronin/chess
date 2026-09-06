@@ -557,12 +557,17 @@ function renderGame() {
         const ex = top ? explainMove(chess, top.pv[0], { rank: 0, mate: top.score.mate, threat: state.threat }) : null;
         html += `<div class="card"><h3>Подсказка <span class="sub">открывайте постепенно</span></h3>
           <div class="hintbar">
-            <button class="btn ${state.reveal >= 1 ? '' : 'primary'}" data-action="reveal" data-level="1" ${!top ? 'disabled' : ''}>1. Идея</button>
-            <button class="btn ${state.reveal === 1 ? 'primary' : ''}" data-action="reveal" data-level="2" ${!top ? 'disabled' : ''}>2. Какой фигурой</button>
-            <button class="btn ${state.reveal === 2 ? 'primary' : ''}" data-action="reveal" data-level="3" ${!top ? 'disabled' : ''}>3. Ход</button>
+            ${[['1', 'Идея'], ['2', 'Какой фигурой'], ['3', 'Ход']]
+              .map(([lvl, label]) => {
+                const n = parseInt(lvl, 10);
+                const done = state.reveal >= n;
+                const next = state.reveal === n - 1;
+                return `<button class="btn ${done ? 'done' : next ? 'next' : ''}" data-action="reveal" data-level="${lvl}" ${!top || done ? 'disabled' : ''}>${done ? '✓ ' : ''}${lvl}. ${label}</button>`;
+              })
+              .join('')}
           </div>
           ${state.reveal >= 1 && ex ? `<div class="prompt"><b>Идея</b>${esc(ideaHint(ex, state.threat, chess))}</div>` : ''}
-          ${state.reveal >= 2 && ex ? `<div class="prompt"><b>Фигура</b>${esc(pieceHint(ex))}</div>` : ''}
+          ${state.reveal >= 2 && ex ? `<div class="prompt"><b>Фигура</b>${esc(pieceHint(ex))}${state.reveal < 3 ? ' <span class="muted">Куда именно — откроет шаг «3. Ход».</span>' : ''}</div>` : ''}
           ${state.reveal >= 3 ? candidatesHtml(chess, state.fen, state.lines, state.threat, state.settings.multipv) : ''}
         </div>`;
         if (state.reveal >= 1) html += threatHtml();
