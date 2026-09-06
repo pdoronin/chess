@@ -468,7 +468,9 @@ function dotsHtml(records, gameForReview) {
 
 function summaryHtml(records) {
   const s = summarize(records);
-  if (!s.total) return `<div class="card summary"><h3>Партия окончена</h3><div class="muted">Нет данных по вашим ходам.</div></div>`;
+  if (!s.total) return `<div class="card summary"><h3>Партия окончена</h3><div class="muted">Нет данных по вашим ходам: партия шла без тренера. Полный разбор с движком доступен по кнопке.</div>
+    <div style="margin-top:8px"><button class="btn primary" data-action="review-current">Открыть разбор партии</button></div>
+  </div>`;
   const c = s.counts;
   const lessons = s.topTags.map((t) => lessonFor(t)).filter(Boolean);
   const key = s.worst.filter((r) => r.deltaWin >= 5);
