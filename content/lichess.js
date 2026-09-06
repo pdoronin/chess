@@ -31,8 +31,9 @@
     let nodes = [];
     let activeIdx = -1;
     if (kind === 'round') {
-      nodes = [...document.querySelectorAll('l4x kwdb')];
-      activeIdx = nodes.findIndex((n) => n.classList.contains('a'));
+      // Широкая раскладка: <l4x><kwdb class="a">; узкая (col1): <app><z7yx class="a1t">.
+      nodes = [...document.querySelectorAll('l4x kwdb, .col1-moves z7yx')];
+      activeIdx = nodes.findIndex((n) => n.classList.contains('a') || n.classList.contains('a1t'));
     } else {
       nodes = [...document.querySelectorAll('.tview2 move')].filter(
         (m) => !m.classList.contains('empty') && !m.closest('lines, line, interrupt')
