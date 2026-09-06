@@ -1,0 +1,62 @@
+#chess-coach-root {
+  position: fixed;
+  top: 90px;
+  right: 16px;
+  width: 360px;
+  z-index: 2147483000;
+  background: #fff;
+  border: 1px solid #c9c9c9;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  font-family: 'Noto Sans', Roboto, Arial, sans-serif;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#chess-coach-root .cc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #2f6f3e;
+  color: #fff;
+  cursor: move;
+  user-select: none;
+  font-size: 14px;
+}
+#chess-coach-root .cc-title { font-weight: 700; }
+#chess-coach-root .cc-status { flex: 1; font-size: 12px; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#chess-coach-root .cc-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #fff;
+  width: 24px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+#chess-coach-root .cc-btn:hover { background: rgba(255, 255, 255, 0.35); }
+#chess-coach-root .cc-frame {
+  width: 100%;
+  height: 560px;
+  max-height: calc(100vh - 140px);
+  border: none;
+  background: #fafafa;
+  display: block;
+}
+#chess-coach-root.cc-collapsed .cc-frame { display: none; }
+#chess-coach-root.cc-collapsed { width: 200px; }
+#chess-coach-root.cc-dragging { opacity: 0.85; }
+
+.cg-wrap svg.cc-arrows,
+cg-container svg.cc-arrows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
