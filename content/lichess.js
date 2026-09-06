@@ -198,7 +198,9 @@
   }
 
   function postToPanel(msg) {
-    if (!iframe || !iframe.contentWindow) return;
+    // До сообщения ready в iframe ещё about:blank с origin lichess — postMessage
+    // на EXT_ORIGIN даёт предупреждение в списке ошибок расширения.
+    if (!panelReady || !iframe || !iframe.contentWindow) return;
     iframe.contentWindow.postMessage(msg, EXT_ORIGIN);
   }
 
