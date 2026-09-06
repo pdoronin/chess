@@ -24,6 +24,28 @@
     return null;
   }
 
+
+  // Запасной способ чтения ходов на странице партии: lichess регулярно
+  // переименовывает теги списка ходов, поэтому ищем листовые элементы
+  // с текстом в шахматной нотации и берём контейнер, где их больше всего.
+  const SAN_RE = /^(O-O(-O)?|0-0(-0)?|[KQRBN♘♗♖♕♔♞♝♜♛♚]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN♘♗♖♕♞♝♜♛])?)[+#]?[!?]*$/;
+  const ACTIVE_RE = /(^|\s)(a|a1t|active|current)(\s|$)/;
+  function scanRoundMoves() {
+    const app = document.querySelector('.round__app');
+    if (!app) return [];
+    const byParent = new Map();
+    for (const el of app.querySelectorAll('*')) {
+      if (el.children.length || el.closest('.cg-wrap, .rclock, .ruser, .rcontrols, .result-wrap')) continue;
+      if (!SAN_RE.test(el.textContent.trim())) continue;
+      const list = byParent.get(el.parentElement) || [];
+      list.push(el);
+      byParent.set(el.parentElement, list);
+    }
+    let best = [];
+    for (const list of byParent.values()) if (list.length > best.length) best = list;
+    return best;
+  }
+
   function readGame() {
     const kind = pageKind();
     if (!kind) return null;
@@ -33,7 +55,8 @@
     if (kind === 'round') {
       // Широкая раскладка: <l4x><kwdb class="a">; узкая (col1): <app><z7yx class="a1t">.
       nodes = [...document.querySelectorAll('l4x kwdb, .col1-moves z7yx')];
-      activeIdx = nodes.findIndex((n) => n.classList.contains('a') || n.classList.contains('a1t'));
+      if (!nodes.length) nodes = scanRoundMoves();
+      activeIdx = nodes.findIndex((n) => ACTIVE_RE.test(n.className || ''));
     } else {
       nodes = [...document.querySelectorAll('.tview2 move')].filter(
         (m) => !m.classList.contains('empty') && !m.closest('lines, line, interrupt')
