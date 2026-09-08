@@ -1,0 +1,17 @@
+{
+  "name": "chess-coach-lichess",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome-расширение: тренер по шахматам для lichess.org (подсказки, разбор партий, уроки)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/",
+    "lint": "eslint .",
+    "e2e": "node test/e2e/mock-lichess.mjs",
+    "zip": "node scripts/build-zip.mjs"
+  },
+  "devDependencies": {
+    "eslint": "^9.13.0"
+  },
+  "license": "GPL-3.0"
+}
