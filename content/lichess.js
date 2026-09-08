@@ -24,6 +24,28 @@
     return null;
   }
 
+
+  // Запасной способ чтения ходов на странице партии: lichess регулярно
+  // переименовывает теги списка ходов, поэтому ищем листовые элементы
+  // с текстом в шахматной нотации и берём контейнер, где их больше всего.
+  const SAN_RE = /^(O-O(-O)?|0-0(-0)?|[KQRBN♘♗♖♕♔♞♝♜♛♚]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN♘♗♖♕♞♝♜♛])?)[+#]?[!?]*$/;
+  const ACTIVE_RE = /(^|\s)(a|a1t|active|current)(\s|$)/;
+  function scanRoundMoves() {
+    const app = document.querySelector('.round__app');
+    if (!app) return [];
+    const byParent = new Map();
+    for (const el of app.querySelectorAll('*')) {
+      if (el.children.length || el.closest('.cg-wrap, .rclock, .ruser, .rcontrols, .result-wrap')) continue;
+      if (!SAN_RE.test(el.textContent.trim())) continue;
+      const list = byParent.get(el.parentElement) || [];
+      list.push(el);
+      byParent.set(el.parentElement, list);
+    }
+    let best = [];
+    for (const list of byParent.values()) if (list.length > best.length) best = list;
+    return best;
+  }
+
   function readGame() {
     const kind = pageKind();
     if (!kind) return null;
@@ -31,8 +53,10 @@
     let nodes = [];
     let activeIdx = -1;
     if (kind === 'round') {
-      nodes = [...document.querySelectorAll('l4x kwdb')];
-      activeIdx = nodes.findIndex((n) => n.classList.contains('a'));
+      // Широкая раскладка: <l4x><kwdb class="a">; узкая (col1): <app><z7yx class="a1t">.
+      nodes = [...document.querySelectorAll('l4x kwdb, .col1-moves z7yx')];
+      if (!nodes.length) nodes = scanRoundMoves();
+      activeIdx = nodes.findIndex((n) => ACTIVE_RE.test(n.className || ''));
     } else {
       nodes = [...document.querySelectorAll('.tview2 move')].filter(
         (m) => !m.classList.contains('empty') && !m.closest('lines, line, interrupt')
@@ -100,7 +124,8 @@
         <button class="cc-btn cc-zoom-in" title="Увеличить панель">A+</button>
         <button class="cc-btn cc-min" title="Свернуть">–</button>
       </div>
-      <iframe class="cc-frame" allow="" title="Шахматный тренер"></iframe>`;
+      <iframe class="cc-frame" allow="" title="Шахматный тренер"></iframe>
+      <div class="cc-resize" title="Потяните, чтобы изменить размер"></div>`;
     document.body.appendChild(root);
     iframe = root.querySelector('iframe');
     iframe.src = PANEL_URL;
@@ -151,9 +176,48 @@
       const r = root.getBoundingClientRect();
       try { localStorage.setItem('chess-coach-pos', JSON.stringify({ x: r.left, y: r.top })); } catch (e) { /* ignore */ }
     });
+
+    // Изменение размера за правый нижний угол
+    const grip = root.querySelector('.cc-resize');
+    let resize = null;
+    grip.addEventListener('mousedown', (e) => {
+      if (collapsed) return;
+      const r = root.getBoundingClientRect();
+      resize = { x: e.clientX, y: e.clientY, w: r.width, h: iframe.getBoundingClientRect().height };
+      // Пока тянем, iframe не должен перехватывать мышь.
+      root.classList.add('cc-dragging');
+      // Если панель прижата к правому краю, фиксируем её левый край.
+      root.style.left = r.left + 'px';
+      root.style.right = 'auto';
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!resize) return;
+      size.w = Math.round(resize.w + e.clientX - resize.x);
+      size.h = Math.round(resize.h + e.clientY - resize.y);
+      clampSize();
+      applyScale();
+    });
+    window.addEventListener('mouseup', () => {
+      if (!resize) return;
+      resize = null;
+      root.classList.remove('cc-dragging');
+      try { localStorage.setItem('chess-coach-size', JSON.stringify(size)); } catch (e) { /* ignore */ }
+    });
   }
 
-  // Масштаб панели: ширина контейнера и zoom содержимого iframe
+  // Размер панели в пикселях, меняется ручкой в углу. Независим от масштаба A−/A+.
+  const size = { w: 360, h: 560 };
+  try {
+    const saved = JSON.parse(localStorage.getItem('chess-coach-size') || 'null');
+    if (saved && typeof saved.w === 'number' && typeof saved.h === 'number') Object.assign(size, saved);
+  } catch (e) { /* ignore */ }
+  function clampSize() {
+    size.w = Math.max(240, Math.min(window.innerWidth - 20, size.w));
+    size.h = Math.max(200, Math.min(window.innerHeight - 80, size.h));
+  }
+
+  // Масштаб содержимого панели (zoom внутри iframe); размер окна не трогает
   let scale = 1;
   try {
     const s = parseFloat(localStorage.getItem('chess-coach-scale'));
@@ -168,13 +232,16 @@
 
   function applyScale() {
     if (!root) return;
-    root.style.width = collapsed ? '' : Math.round(360 * scale) + 'px';
-    iframe.style.height = Math.round(560 * scale) + 'px';
+    clampSize();
+    root.style.width = collapsed ? '' : size.w + 'px';
+    iframe.style.height = size.h + 'px';
     postToPanel({ type: 'scale', scale });
   }
 
   function postToPanel(msg) {
-    if (!iframe || !iframe.contentWindow) return;
+    // До сообщения ready в iframe ещё about:blank с origin lichess — postMessage
+    // на EXT_ORIGIN даёт предупреждение в списке ошибок расширения.
+    if (!panelReady || !iframe || !iframe.contentWindow) return;
     iframe.contentWindow.postMessage(msg, EXT_ORIGIN);
   }
 

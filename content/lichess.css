@@ -50,6 +50,18 @@
 #chess-coach-root.cc-collapsed .cc-frame { display: none; }
 #chess-coach-root.cc-collapsed { width: 240px !important; }
 #chess-coach-root.cc-dragging { opacity: 0.85; }
+#chess-coach-root.cc-dragging .cc-frame { pointer-events: none; }
+#chess-coach-root .cc-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 0 50%, #9a9a9a 50% 60%, transparent 60% 70%, #9a9a9a 70% 80%, transparent 80%);
+  border-bottom-right-radius: 10px;
+}
+#chess-coach-root.cc-collapsed .cc-resize { display: none; }
 
 .cg-wrap svg.cc-arrows,
 cg-container svg.cc-arrows {

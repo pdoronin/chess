@@ -468,7 +468,9 @@ function dotsHtml(records, gameForReview) {
 
 function summaryHtml(records) {
   const s = summarize(records);
-  if (!s.total) return `<div class="card summary"><h3>Партия окончена</h3><div class="muted">Нет данных по вашим ходам.</div></div>`;
+  if (!s.total) return `<div class="card summary"><h3>Партия окончена</h3><div class="muted">Нет данных по вашим ходам: партия шла без тренера. Полный разбор с движком доступен по кнопке.</div>
+    <div style="margin-top:8px"><button class="btn primary" data-action="review-current">Открыть разбор партии</button></div>
+  </div>`;
   const c = s.counts;
   const lessons = s.topTags.map((t) => lessonFor(t)).filter(Boolean);
   const key = s.worst.filter((r) => r.deltaWin >= 5);
@@ -555,12 +557,17 @@ function renderGame() {
         const ex = top ? explainMove(chess, top.pv[0], { rank: 0, mate: top.score.mate, threat: state.threat }) : null;
         html += `<div class="card"><h3>Подсказка <span class="sub">открывайте постепенно</span></h3>
           <div class="hintbar">
-            <button class="btn ${state.reveal >= 1 ? '' : 'primary'}" data-action="reveal" data-level="1" ${!top ? 'disabled' : ''}>1. Идея</button>
-            <button class="btn ${state.reveal === 1 ? 'primary' : ''}" data-action="reveal" data-level="2" ${!top ? 'disabled' : ''}>2. Какой фигурой</button>
-            <button class="btn ${state.reveal === 2 ? 'primary' : ''}" data-action="reveal" data-level="3" ${!top ? 'disabled' : ''}>3. Ход</button>
+            ${[['1', 'Идея'], ['2', 'Какой фигурой'], ['3', 'Ход']]
+              .map(([lvl, label]) => {
+                const n = parseInt(lvl, 10);
+                const done = state.reveal >= n;
+                const next = state.reveal === n - 1;
+                return `<button class="btn ${done ? 'done' : next ? 'next' : ''}" data-action="reveal" data-level="${lvl}" ${!top || done ? 'disabled' : ''}>${done ? '✓ ' : ''}${lvl}. ${label}</button>`;
+              })
+              .join('')}
           </div>
           ${state.reveal >= 1 && ex ? `<div class="prompt"><b>Идея</b>${esc(ideaHint(ex, state.threat, chess))}</div>` : ''}
-          ${state.reveal >= 2 && ex ? `<div class="prompt"><b>Фигура</b>${esc(pieceHint(ex))}</div>` : ''}
+          ${state.reveal >= 2 && ex ? `<div class="prompt"><b>Фигура</b>${esc(pieceHint(ex))}${state.reveal < 3 ? ' <span class="muted">Куда именно — откроет шаг «3. Ход».</span>' : ''}</div>` : ''}
           ${state.reveal >= 3 ? candidatesHtml(chess, state.fen, state.lines, state.threat, state.settings.multipv) : ''}
         </div>`;
         if (state.reveal >= 1) html += threatHtml();
@@ -654,6 +661,16 @@ function renderReview() {
     <div class="status">${scoreWhite ? esc(scoreWords(scoreWhite)) : ''}${liveBusy() ? ' · движок занят текущей партией' : r.done ? ' · глубина ' + r.depth : state.settings.reviewAnalyze && !chess.isGameOver() ? ` · <span class="spinner"></span>считаю…` : ''}</div>
   </div>`;
 
+  // Список ходов — сразу под доской, чтобы был виден без прокрутки.
+  const cells = [];
+  for (let i = 0; i < g.moves.length; i++) {
+    const rr = (g.records || []).find((x) => x.ply === i);
+    const col = rr ? QUALITY[rr.quality].color : '#999';
+    const mark = rr && (rr.quality === 'inaccuracy' || rr.quality === 'mistake' || rr.quality === 'blunder') ? QUALITY[rr.quality].icon : '';
+    cells.push(`${i % 2 === 0 ? `<span class="num">${i / 2 + 1}.</span>` : ''}<span class="mv ${i + 1 === r.ply ? 'cur' : ''}" data-review-go="${i + 1}" style="border-bottom:2px solid ${col}">${esc(g.moves[i])}${mark}</span>`);
+  }
+  html += `<div class="card movelist">${cells.join(' ')}</div>`;
+
   if (rec) {
     html += feedbackHtml(rec, rec.mine ? 'Ваш ход в этой позиции' : 'Ход соперника в этой позиции');
     if (rec.bestPv && rec.bestPv.length) html += `<div class="card small"><b>Линия движка во время партии:</b> ${esc(pvToSan(fen, rec.bestPv, 8).join(' '))}</div>`;
@@ -663,15 +680,6 @@ function renderReview() {
   }
   if (chess.isGameOver()) html += `<div class="card">${chess.isCheckmate() ? 'Мат.' : 'Партия окончена.'}</div>`;
 
-  // список ходов
-  const cells = [];
-  for (let i = 0; i < g.moves.length; i++) {
-    const rr = (g.records || []).find((x) => x.ply === i);
-    const col = rr ? QUALITY[rr.quality].color : '#999';
-    const mark = rr && (rr.quality === 'inaccuracy' || rr.quality === 'mistake' || rr.quality === 'blunder') ? QUALITY[rr.quality].icon : '';
-    cells.push(`${i % 2 === 0 ? `<span class="num">${i / 2 + 1}.</span>` : ''}<span class="mv ${i + 1 === r.ply ? 'cur' : ''}" data-review-go="${i + 1}" style="border-bottom:2px solid ${col}">${esc(g.moves[i])}${mark}</span>`);
-  }
-  html += `<div class="card movelist">${cells.join(' ')}</div>`;
   html += summaryHtml(g.records || []).replace(/<div style="margin-top:8px"><button class="btn primary" data-action="review-current">[^<]*<\/button><\/div>/, '');
   return html;
 }
@@ -733,6 +741,8 @@ function render() {
   else if (state.tab === 'lessons') view.innerHTML = renderLessons();
   else view.innerHTML = renderSettings();
   view.scrollTop = scroll;
+  const cur = view.querySelector('.movelist .mv.cur');
+  if (cur) cur.scrollIntoView({ block: 'nearest' });
   sendArrows();
   sendStatus();
 }
