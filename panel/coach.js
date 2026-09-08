@@ -1,6 +1,6 @@
 // «Тренерская» логика: оценка качества сыгранных ходов, модели мышления перед ходом,
 // подсказки-намёки и итоги партии.
-import { hangingPieces, detectPhase, label, PIECE_NAME, VALUE, opp } from './explain.js';
+import { hangingPieces, PIECE_NAME, VALUE, opp } from './explain.js';
 
 // Оценка (в сантипешках с точки зрения ходящего) -> вероятность выигрыша 0..100.
 export function winPct(score) {

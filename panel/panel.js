@@ -732,7 +732,19 @@ function renderSettings() {
   <div class="card small muted">Движок: Stockfish 18 lite, работает локально в браузере; партии и настройки хранятся только в вашем браузере, ничего не отправляется в интернет. Расширение предназначено для обучения: используйте подсказки в нерейтинговых партиях, а рейтинговые разбирайте после окончания.</div>`;
 }
 
+// Перерисовка объединяется по кадрам: движок присылает info по нескольку раз в секунду,
+// а полная сборка HTML на каждое сообщение приводит к дёрганью интерфейса.
+let renderQueued = false;
 function render() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    renderNow();
+  });
+}
+
+function renderNow() {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === state.tab));
   const scroll = view.scrollTop;
   if (state.tab === 'game') view.innerHTML = renderGame();

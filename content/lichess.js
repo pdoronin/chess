@@ -321,7 +321,12 @@
     ensurePanel();
     root.style.display = '';
     const key = JSON.stringify([game.moves, game.viewing, game.total, game.orientation, game.myColor, game.gameOver, game.rated, game.gameId, game.resultText]);
-    const timeChanged = lastPayload && lastPayload.myTime !== game.myTime;
+    // Часы тикают каждую секунду, но время нужно панели только для подсказки
+    // «мало времени», поэтому реагируем на заметные изменения, а не на каждый тик.
+    const timeChanged =
+      lastPayload &&
+      typeof game.myTime === 'number' &&
+      (typeof lastPayload.myTime !== 'number' || Math.abs(lastPayload.myTime - game.myTime) >= 10 || (game.myTime < 30) !== (lastPayload.myTime < 30));
     if (key === lastKey && !timeChanged) return;
     const positionChanged = key !== lastKey;
     lastKey = key;
