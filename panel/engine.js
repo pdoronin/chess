@@ -100,7 +100,10 @@ export class Engine {
     }
     const run = async () => {
       if (token !== this.latest) return null;
+      // Ждать готовности воркера можно секунды (компиляция WASM), за это время
+      // позиция успевает смениться, поэтому проверяем актуальность ещё раз.
       await this.ready;
+      if (token !== this.latest) return null;
       return new Promise((resolve) => {
         this.current = { lines: [], onInfo, resolve, aborted: false };
         if (multipv !== this.multipv) {
@@ -111,6 +114,8 @@ export class Engine {
         this.send(`go movetime ${movetime}`);
       });
     };
+    // Один и тот же обработчик на успех и на ошибку: очередь не должна обрываться,
+    // если предыдущий поиск завершился исключением.
     this.queue = this.queue.then(run, run);
     return this.queue;
   }

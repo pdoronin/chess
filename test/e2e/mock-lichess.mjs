@@ -82,6 +82,13 @@ await frameOf().click('.tab[data-tab="history"]'); await wait(800);
 console.log('--- history ---\n', (await text()).slice(0, 600));
 await frameOf().click('button[data-open-game]'); await wait(1500);
 console.log('--- opened from history:', (await text()).split('◀')[1].split('▶')[0].trim());
+// Удаление партии из истории: карточка целиком кликабельна, кнопка не должна открывать разбор.
+await frameOf().click('.tab[data-tab="history"]'); await wait(500);
+page.once('dialog', (d) => d.accept());
+await frameOf().click('button[data-delete-game]'); await wait(1200);
+const afterDelete = await frameOf().evaluate(() => new Promise((r) => chrome.storage.local.get(null, r)));
+console.log('после удаления: индекс =', JSON.stringify(afterDelete.gameIndex), '| ключи =', Object.keys(afterDelete));
+
 await frameOf().click('.tab[data-tab="lessons"]'); await wait(300);
 console.log('--- lessons ---\n', (await text()).slice(0, 400));
 await frameOf().click('.tab[data-tab="settings"]'); await wait(300);

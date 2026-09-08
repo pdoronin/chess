@@ -8,13 +8,30 @@ function area() {
   }
 }
 
+// Последняя ошибка хранилища: панель показывает её пользователю, чтобы «партия
+// не сохранилась» не выглядело как «партии не было».
+export let lastError = null;
+
+function runtimeError() {
+  try {
+    return chrome.runtime.lastError ? chrome.runtime.lastError.message : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 export function get(keys) {
   return new Promise((resolve) => {
     const a = area();
     if (!a) return resolve({});
     try {
-      a.get(keys, (v) => resolve(v || {}));
+      a.get(keys, (v) => {
+        const err = runtimeError();
+        if (err) lastError = err;
+        resolve(v || {});
+      });
     } catch (e) {
+      lastError = e.message;
       resolve({});
     }
   });
@@ -23,11 +40,16 @@ export function get(keys) {
 export function set(obj) {
   return new Promise((resolve) => {
     const a = area();
-    if (!a) return resolve();
+    if (!a) return resolve(false);
     try {
-      a.set(obj, () => resolve());
+      a.set(obj, () => {
+        const err = runtimeError();
+        if (err) lastError = err;
+        resolve(!err);
+      });
     } catch (e) {
-      resolve();
+      lastError = e.message;
+      resolve(false);
     }
   });
 }
@@ -35,13 +57,28 @@ export function set(obj) {
 export function remove(keys) {
   return new Promise((resolve) => {
     const a = area();
-    if (!a) return resolve();
+    if (!a) return resolve(false);
     try {
-      a.remove(keys, () => resolve());
+      a.remove(keys, () => {
+        const err = runtimeError();
+        if (err) lastError = err;
+        resolve(!err);
+      });
     } catch (e) {
-      resolve();
+      lastError = e.message;
+      resolve(false);
     }
   });
+}
+
+// Запись индекса — это чтение-изменение-запись, поэтому все операции идут
+// по одной очереди: иначе две вкладки (или удаление во время автосохранения)
+// затирают изменения друг друга.
+let queue = Promise.resolve();
+function serial(fn) {
+  const next = queue.then(fn, fn);
+  queue = next.catch(() => {});
+  return next;
 }
 
 export async function loadIndex() {
@@ -55,7 +92,11 @@ export async function loadGame(id) {
 }
 
 // Сохраняет партию и обновляет индекс (краткие сведения для списка истории).
-export async function saveGame(game, summary) {
+export function saveGame(game, summary) {
+  return serial(() => saveGameNow(game, summary));
+}
+
+async function saveGameNow(game, summary) {
   const index = await loadIndex();
   const entry = {
     id: game.id,
@@ -79,7 +120,11 @@ export async function saveGame(game, summary) {
   return index;
 }
 
-export async function deleteGame(id) {
+export function deleteGame(id) {
+  return serial(() => deleteGameNow(id));
+}
+
+async function deleteGameNow(id) {
   const index = (await loadIndex()).filter((g) => g.id !== id);
   await remove(['game:' + id]);
   await set({ gameIndex: index });

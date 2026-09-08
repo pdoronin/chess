@@ -106,3 +106,23 @@ test('объяснение невозможного хода не выбрасы
   assert.equal(res.reasons.length, 0);
   assert.deepEqual(res.tags, []);
 });
+
+test('взятие на проходе описывается полем реально снятой пешки', () => {
+  // Белая пешка e5 бьёт чёрную пешку f5 на проходе, приходя на f6.
+  const c = new Chess('rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3');
+  const res = explainMove(c, 'e5f6');
+  assert.match(texts(res), /пешку f5 на проходе/);
+});
+
+test('связанной может быть и пешка', () => {
+  // Ладья d1 связывает пешку d6 против ферзя d8.
+  const c = new Chess('3qk3/8/3p4/8/8/8/8/3RK3 w - - 0 1');
+  const res = explainMove(c, 'd1d2');
+  assert.match(texts(res), /Связка/);
+});
+
+test('дебютная фаза сохраняется после раннего размена ферзей', () => {
+  const c = new Chess();
+  for (const m of ['e4', 'd5', 'exd5', 'Qxd5', 'Nc3', 'Qe5+', 'Qe2', 'Qxe2+', 'Bxe2']) c.move(m);
+  assert.equal(detectPhase(c), 'opening');
+});

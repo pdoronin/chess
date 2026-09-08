@@ -43,6 +43,8 @@ const state = {
   ratedDismissed: false,
   engineError: null,
   openLesson: null,
+  scrollToLesson: null, // id урока, к которому нужно прокрутить после перерисовки
+  scrollToPly: null, // полуход, к которому нужно прокрутить список ходов в разборе
   // сохранение
   gameData: null,
   saveTimer: null,
@@ -91,11 +93,18 @@ function post(msg) {
   window.parent.postMessage(msg, PARENT_ORIGIN);
 }
 
+// onGame асинхронна (читает хранилище), поэтому сообщения обрабатываются строго
+// по очереди: иначе две копии onGame перетирают состояние друг друга.
+let gameQueue = Promise.resolve();
+
 window.addEventListener('message', (e) => {
   if (e.origin !== PARENT_ORIGIN || e.source !== window.parent) return;
   const msg = e.data || {};
-  if (msg.type === 'game') onGame(msg);
-  else if (msg.type === 'scale') document.documentElement.style.zoom = String(msg.scale || 1);
+  if (msg.type === 'game') {
+    gameQueue = gameQueue.then(() => onGame(msg)).catch((err) => console.error('[тренер] ошибка обработки партии', err));
+  } else if (msg.type === 'scale') {
+    document.documentElement.style.zoom = String(msg.scale || 1);
+  }
 });
 
 // ---------- Текущая партия ----------
@@ -141,8 +150,11 @@ async function onGame(msg) {
     return;
   }
 
-  // Готовим разбор только что сделанного хода.
-  const prev = state.key !== null ? { key: state.key, moves: state.moves, fen: state.fen, lines: state.lines, viewingAll: state.viewingAll } : null;
+  // Готовим разбор только что сделанного хода. Запись делается, только если
+  // выполнены все условия: и до, и после мы смотрели живую позицию (а не листали
+  // партию), добавился ровно один ход, и предыдущая позиция уже была посчитана
+  // движком. Иначе сравнивать «до» и «после» не с чем.
+  const prev = state.key !== null ? { key: state.key, moves: state.moves, fen: state.fen, lines: state.lines, viewingAll: state.viewingAll, threat: state.threat } : null;
   state.pending = null;
   if (prev && prev.lines.length && prev.viewingAll && msg.viewing === msg.total && msg.moves.length === prev.moves.length + 1 && prev.key === msg.moves.slice(0, -1).join(' ')) {
     const before = new Chess(prev.fen);
@@ -163,6 +175,7 @@ async function onGame(msg) {
         playedUci,
         fenBefore: prev.fen,
         linesBefore: prev.lines,
+        threat: prev.threat,
       };
     }
   }
@@ -202,7 +215,9 @@ function startAnalysis() {
         if (reqId !== state.reqId) return;
         state.lines = lines;
         state.depth = lines[0].depth;
-        if (state.pending && state.depth >= 10) finalizePending(false);
+        // Предварительный вердикт, чтобы разбор появился быстро; после окончания
+        // поиска он пересчитывается на полной глубине (finalizePending, preliminary).
+        if (state.pending && state.depth >= 10) finalizePending(false, true);
         render();
       },
     })
@@ -223,7 +238,7 @@ function startAnalysis() {
 }
 
 // Оценка сыгранного хода после того, как проанализирована новая позиция.
-function finalizePending(terminal) {
+function finalizePending(terminal, preliminary = false) {
   const p = state.pending;
   if (!p) return;
   const best = p.linesBefore[0];
@@ -251,10 +266,12 @@ function finalizePending(terminal) {
     const pu = state.lines[0].pv[0];
     const ex = explainMove(state.chess, pu, { rank: 0, mate: state.lines[0].score.mate });
     punish = { san: ex.san, uci: pu, reasons: ex.reasons.slice(0, 2), tags: ex.tags };
-    // Наказание часто и есть та угроза, которую лучший ход должен был снять.
-    threatCtx = explainThreat(p.fenBefore, pu, state.lines[0].score);
+    // Наказание — обычный ход соперника в текущей позиции, свопать сторону не нужно.
+    threatCtx = { uci: pu, san: ex.san, from: ex.move ? ex.move.from : null, to: ex.move ? ex.move.to : null, captured: ex.move ? ex.move.captured || null : null, mate: !!(state.lines[0].score.mate && state.lines[0].score.mate > 0) };
   }
-  const bestEx = explainMove(before, bestUci, { rank: 0, mate: best.score.mate, threat: threatCtx });
+  // Для объяснения «что предотвращал лучший ход» нужна угроза в позиции ДО хода.
+  const threatBefore = p.threat || null;
+  const bestEx = explainMove(before, bestUci, { rank: 0, mate: best.score.mate, threat: threatBefore });
   const playedEx = explainMove(before, p.playedUci, { rank: 1 });
   const tags = [...new Set([...(punish ? punish.tags : []), ...bestEx.tags])].slice(0, 3);
 
@@ -272,7 +289,7 @@ function finalizePending(terminal) {
     bestReasons: bestEx.reasons.slice(0, 3),
     playedReasons: playedEx.reasons.slice(0, 2),
     punish,
-    threat: threatCtx ? { uci: threatCtx.uci, san: threatCtx.san, from: threatCtx.from, to: threatCtx.to, captured: threatCtx.captured, mate: threatCtx.mate } : null,
+    threat: threatCtx,
     tags,
     evalBefore,
     evalAfter,
@@ -283,7 +300,9 @@ function finalizePending(terminal) {
   if (idx >= 0) state.records[idx] = record;
   else state.records.push(record);
   state.records = state.records.filter((r) => r.ply <= p.ply).sort((a, b) => a.ply - b.ply);
-  state.pending = null;
+  if (state.gameData) state.gameData.records = state.records;
+  // Предварительную запись оставляем «незакрытой», чтобы пересчитать её на полной глубине.
+  if (!preliminary) state.pending = null;
   scheduleSave();
 }
 
@@ -318,7 +337,9 @@ function updateGameData(msg) {
     };
   }
   const g = state.gameData;
-  if (msg.viewing === msg.total && msg.moves.length >= g.moves.length) g.moves = msg.moves.slice();
+  // Пишем ровно то, что сейчас на странице: при takeback список должен укоротиться.
+  // Пустой список игнорируем — это lichess ещё не отрисовал ходы.
+  if (msg.viewing === msg.total && (msg.moves.length || !g.moves.length)) g.moves = msg.moves.slice();
   g.records = state.records;
   g.rated = msg.rated;
   if (msg.players) {
@@ -360,6 +381,7 @@ function reviewGoto(ply) {
   const r = state.review;
   if (!r) return;
   r.ply = Math.max(0, Math.min(ply, r.game.moves.length));
+  state.scrollToPly = r.ply;
   r.lines = [];
   r.depth = 0;
   r.done = false;
@@ -379,14 +401,14 @@ function reviewGoto(ply) {
       movetime: state.settings.movetime,
       multipv: state.settings.multipv,
       onInfo: (lines) => {
-        if (!state.review || reqId !== state.review.reqId) return;
+        if (state.review !== r || reqId !== r.reqId) return;
         r.lines = lines;
         r.depth = lines[0].depth;
         render();
       },
     })
     .then((res) => {
-      if (!res || !state.review || reqId !== state.review.reqId) return;
+      if (!res || state.review !== r || reqId !== r.reqId) return;
       if (res.lines.length) r.lines = res.lines;
       r.done = true;
       render();
@@ -466,10 +488,10 @@ function dotsHtml(records, gameForReview) {
     .join('')}</div>${gameForReview ? '<div class="small muted" style="margin-top:4px">Нажмите на точку, чтобы открыть разбор этого хода.</div>' : ''}</div>`;
 }
 
-function summaryHtml(records) {
+function summaryHtml(records, { withReviewButton = true } = {}) {
   const s = summarize(records);
   if (!s.total) return `<div class="card summary"><h3>Партия окончена</h3><div class="muted">Нет данных по вашим ходам: партия шла без тренера. Полный разбор с движком доступен по кнопке.</div>
-    <div style="margin-top:8px"><button class="btn primary" data-action="review-current">Открыть разбор партии</button></div>
+    ${withReviewButton ? '<div style="margin-top:8px"><button class="btn primary" data-action="review-current">Открыть разбор партии</button></div>' : ''}
   </div>`;
   const c = s.counts;
   const lessons = s.topTags.map((t) => lessonFor(t)).filter(Boolean);
@@ -482,7 +504,7 @@ function summaryHtml(records) {
       .map((r) => `<li><a href="#" data-review-ply="${r.ply}">${r.moveNumber}.${r.mover === 'b' ? '..' : ''} ${esc(r.san)}</a> (${QUALITY[r.quality].label.toLowerCase()}) — лучше ${esc(r.bestSan)}${r.bestReasons[0] ? ': ' + esc(r.bestReasons[0].text) : ''}</li>`)
       .join('')}</ul></div>` : '<div class="muted small" style="margin-top:6px">Серьёзных ошибок не было — отличная партия!</div>'}
     ${lessons.length ? `<div style="margin-top:6px"><b>Что изучить:</b> ${lessons.map((l) => `<span class="tagchip" data-lesson="${l.id}">${esc(l.title)}</span>`).join(' ')}</div>` : ''}
-    <div style="margin-top:8px"><button class="btn primary" data-action="review-current">Открыть разбор партии</button></div>
+    ${withReviewButton ? '<div style="margin-top:8px"><button class="btn primary" data-action="review-current">Открыть разбор партии</button></div>' : ''}
   </div>`;
 }
 
@@ -589,22 +611,23 @@ function renderGame() {
 
 function evalGraphSvg(game, ply) {
   const recs = (game.records || []).slice().sort((a, b) => a.ply - b.ply);
-  if (recs.length < 2) return '';
   const n = game.moves.length;
+  if (recs.length < 2 || !n) return '';
+  const clamp = (v) => Math.max(0, Math.min(100, v));
   const pts = recs.map((r) => {
     const sw = r.mover === 'w' ? r.evalAfter : negate(r.evalAfter);
     const p = winPct(sw);
-    return [((r.ply + 1) / n) * 100, 100 - p];
+    return [clamp(((r.ply + 1) / n) * 100), clamp(100 - p)];
   });
   const path = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
   const marks = recs
     .filter((r) => r.mine && (r.quality === 'mistake' || r.quality === 'blunder'))
     .map((r) => {
       const sw = r.mover === 'w' ? r.evalAfter : negate(r.evalAfter);
-      return `<circle cx="${(((r.ply + 1) / n) * 100).toFixed(1)}" cy="${(100 - winPct(sw)).toFixed(1)}" r="3" fill="${QUALITY[r.quality].color}"/>`;
+      return `<circle cx="${clamp(((r.ply + 1) / n) * 100).toFixed(1)}" cy="${clamp(100 - winPct(sw)).toFixed(1)}" r="3" fill="${QUALITY[r.quality].color}"/>`;
     })
     .join('');
-  const x = ((ply / n) * 100).toFixed(1);
+  const x = clamp((ply / n) * 100).toFixed(1);
   return `<svg class="evalgraph" viewBox="0 0 100 100" preserveAspectRatio="none"><rect x="0" y="0" width="100" height="100" fill="#444"/><path d="${path} L100,100 L0,100 Z" fill="#eee"/><line x1="0" y1="50" x2="100" y2="50" stroke="#999" stroke-width="0.5"/><line x1="${x}" y1="0" x2="${x}" y2="100" stroke="#2f6f3e" stroke-width="1"/>${marks}</svg>`;
 }
 
@@ -680,7 +703,7 @@ function renderReview() {
   }
   if (chess.isGameOver()) html += `<div class="card">${chess.isCheckmate() ? 'Мат.' : 'Партия окончена.'}</div>`;
 
-  html += summaryHtml(g.records || []).replace(/<div style="margin-top:8px"><button class="btn primary" data-action="review-current">[^<]*<\/button><\/div>/, '');
+  html += summaryHtml(g.records || [], { withReviewButton: false });
   return html;
 }
 
@@ -694,7 +717,7 @@ function renderHistory() {
       const date = `${d.toLocaleDateString('ru-RU')} ${d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
       return `<div class="card hist" data-open-game="${esc(e.id)}">
         <div class="lt"><b>${e.myColor === 'white' ? '⬜' : '⬛'} ${esc(e.opponent || 'соперник')}</b><span class="muted small">${date}</span></div>
-        <div class="small">${e.result ? esc(e.result) : e.finished ? 'завершена' : 'в процессе'} · ${e.moves} ходов · точность ${e.accuracy != null ? e.accuracy + '%' : '—'} · ошибок ${e.mistakes || 0}${e.rated ? ' · рейтинговая' : ''}</div>
+        <div class="small">${e.result ? esc(e.result) : e.finished ? 'завершена' : 'в процессе'} · ${Math.ceil((e.moves || 0) / 2)} ходов · точность ${e.accuracy != null ? e.accuracy + '%' : '—'} · ошибок ${e.mistakes || 0}${e.rated ? ' · рейтинговая' : ''}</div>
         <div style="margin-top:4px"><button class="btn small" data-open-game="${esc(e.id)}">Разбор</button> <button class="btn small" data-delete-game="${esc(e.id)}">Удалить</button></div>
       </div>`;
     })
@@ -753,8 +776,22 @@ function renderNow() {
   else if (state.tab === 'lessons') view.innerHTML = renderLessons();
   else view.innerHTML = renderSettings();
   view.scrollTop = scroll;
+
+  // Список ходов в разборе прокручиваем внутри его собственного контейнера,
+  // иначе scrollIntoView утаскивает всю панель и отбирает прокрутку у пользователя.
   const cur = view.querySelector('.movelist .mv.cur');
-  if (cur) cur.scrollIntoView({ block: 'nearest' });
+  if (cur && state.scrollToPly !== null) {
+    const box = cur.parentElement;
+    box.scrollTop = Math.max(0, cur.offsetTop - box.clientHeight / 2 + cur.offsetHeight / 2);
+    state.scrollToPly = null;
+  }
+
+  // Переход по ссылке на урок: элемент появляется только после перерисовки.
+  if (state.scrollToLesson) {
+    const el = view.querySelector(`[data-lesson-card="${state.scrollToLesson}"]`);
+    state.scrollToLesson = null;
+    if (el) el.scrollIntoView({ block: 'start' });
+  }
   sendArrows();
   sendStatus();
 }
@@ -813,9 +850,8 @@ view.addEventListener('click', async (e) => {
   if (chip) {
     state.tab = 'lessons';
     state.openLesson = chip.dataset.lesson;
+    state.scrollToLesson = chip.dataset.lesson;
     render();
-    const el = view.querySelector(`[data-lesson-card="${state.openLesson}"]`);
-    if (el) el.scrollIntoView({ block: 'start' });
     return;
   }
   const go = e.target.closest('[data-review-go]');
@@ -829,17 +865,18 @@ view.addEventListener('click', async (e) => {
     if (state.gameData) openReview(state.gameData, parseInt(rp.dataset.reviewPly, 10));
     return;
   }
-  const og = e.target.closest('[data-open-game]');
-  if (og) {
-    await openGameById(og.dataset.openGame);
-    return;
-  }
+  // Кнопка удаления лежит внутри карточки с data-open-game, поэтому проверяется первой.
   const dg = e.target.closest('[data-delete-game]');
   if (dg) {
     if (confirm('Удалить эту партию из истории?')) {
       state.index = await store.deleteGame(dg.dataset.deleteGame);
       render();
     }
+    return;
+  }
+  const og = e.target.closest('[data-open-game]');
+  if (og) {
+    await openGameById(og.dataset.openGame);
     return;
   }
   const tg = e.target.closest('[data-tab-go]');
@@ -861,6 +898,10 @@ view.addEventListener('click', async (e) => {
         scheduleSave();
       }
     } else if (a === 'hide-hints') state.visible = false;
+    else if (a === 'reload-panel') {
+      location.reload();
+      return;
+    }
     else if (a === 'review-current') {
       if (state.gameData) openReview(state.gameData, state.moves.length ? Math.max(0, state.game.viewing) : 0);
       return;

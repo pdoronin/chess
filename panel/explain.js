@@ -87,7 +87,8 @@ export function detectPhase(chess) {
     if (p.type === 'q') queens++;
   }
   const move = chess.moveNumber();
-  if (move <= 12 && npm >= 52) return 'opening';
+  // Порог 40 держит дебют после раннего размена ферзей (стартовые 62 минус 18).
+  if (move <= 12 && npm >= 40) return 'opening';
   if (npm <= 26 || (queens === 0 && npm <= 32)) return 'endgame';
   return 'middlegame';
 }
@@ -126,8 +127,9 @@ function pinsAndSkewers(chess, sq, us) {
       if (!p) continue;
       if (p.color === us) break;
       if (!first) {
+        // Король первым по линии — это шах, а не связка. Пешка связывается как обычная фигура.
         first = { sq: cur, type: p.type };
-        if (p.type === 'k' || p.type === 'p') break;
+        if (p.type === 'k') break;
         continue;
       }
       const second = { sq: cur, type: p.type };
@@ -204,7 +206,7 @@ export function explainMove(chess, uci, ctx = {}) {
   try {
     mv = after.move(uciToMove(uci));
   } catch (e) {
-    return { san: uci, reasons: [], warnings: [], tags: [] };
+    return { san: uci, move: null, reasons: [], warnings: [], tags: [] };
   }
   const us = mv.color;
   const them = opp(us);
@@ -225,12 +227,16 @@ export function explainMove(chess, uci, ctx = {}) {
   // --- Материал ---
   if (mv.captured) {
     const capVal = VALUE[mv.captured];
-    const wasDefended = chess.attackers(mv.to, them).length > 0;
+    // При взятии на проходе снимаемая пешка стоит не на поле хода, а рядом.
+    const enPassant = mv.flags.includes('e');
+    const capturedSquare = enPassant ? mv.to[0] + mv.from[1] : mv.to;
+    const wasDefended = chess.attackers(capturedSquare, them).length > 0;
     const myVal = VALUE[mv.piece];
-    if (!wasDefended) add(`Берёт ${labelAcc(mv.captured, mv.to)} — ${pron(mv.captured)} без защиты, это чистый выигрыш материала.`, 'material', 6);
-    else if (myVal < capVal) add(`Берёт ${labelAcc(mv.captured, mv.to)}: выгодный размен — отдаёте ${myVal}, получаете ${capVal}.`, 'material', 6);
-    else if (myVal === capVal) add(`Берёт ${labelAcc(mv.captured, mv.to)} — равный размен, который упрощает позицию.`, 'material', 2);
-    else add(`Берёт ${labelAcc(mv.captured, mv.to)} более ценной фигурой — это жертва: смысл в последующей тактике (см. план ниже).`, 'calculation', 5);
+    const target = labelAcc(mv.captured, capturedSquare) + (enPassant ? ' на проходе' : '');
+    if (!wasDefended) add(`Берёт ${target} — ${pron(mv.captured)} без защиты, это чистый выигрыш материала.`, 'material', 6);
+    else if (myVal < capVal) add(`Берёт ${target}: выгодный размен — отдаёте ${myVal}, получаете ${capVal}.`, 'material', 6);
+    else if (myVal === capVal) add(`Берёт ${target} — равный размен, который упрощает позицию.`, 'material', 2);
+    else add(`Берёт ${target} более ценной фигурой — это жертва: смысл в последующей тактике (см. план ниже).`, 'calculation', 5);
   }
   if (mv.flags.includes('k') || mv.flags.includes('q')) add('Рокировка: король уходит в укрытие, а ладья подключается к игре.', 'king-safety', 4);
   if (mv.promotion) add('Превращение пешки в новую фигуру.', 'endgame', 8);
@@ -238,6 +244,8 @@ export function explainMove(chess, uci, ctx = {}) {
   // --- Тактика после хода ---
   const attackedBefore = new Set(attackedEnemyPieces(chess, us).map((t) => t.sq));
   const attackedAfter = attackedEnemyPieces(after, us);
+  // Цель считается новой, если раньше на неё не нападали ИЛИ на неё напала именно
+  // сходившая фигура: второе нужно, чтобы поймать вилку, где одна из целей уже была под боем.
   const newTargets = attackedAfter.filter(
     (t) => (!attackedBefore.has(t.sq) || t.attackers.includes(mv.to)) && (t.undefended || t.minAtt < VALUE[t.type])
   );

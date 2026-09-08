@@ -2,6 +2,10 @@
 // подсказки-намёки и итоги партии.
 import { hangingPieces, PIECE_NAME, VALUE, opp } from './explain.js';
 
+// Соглашение об оценках: движок и вся внутренняя логика хранят оценку с точки зрения
+// стороны, которая ходит в этой позиции. Для показа пользователю оценка переводится
+// в точку зрения белых функцией toWhitePov (ниже) или negate.
+//
 // Оценка (в сантипешках с точки зрения ходящего) -> вероятность выигрыша 0..100.
 export function winPct(score) {
   if (!score) return 50;
@@ -14,6 +18,11 @@ export function negate(score) {
   if (!score) return null;
   if (typeof score.mate === 'number') return { mate: -score.mate };
   return { cp: -score.cp };
+}
+
+// Перевод оценки в точку зрения белых: mover — чья очередь хода была в той позиции.
+export function toWhitePov(score, mover) {
+  return mover === 'w' ? score : negate(score);
 }
 
 export function fmtScore(score, povWhite = true) {

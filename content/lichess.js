@@ -30,9 +30,15 @@
   // с текстом в шахматной нотации и берём контейнер, где их больше всего.
   const SAN_RE = /^(O-O(-O)?|0-0(-0)?|[KQRBN♘♗♖♕♔♞♝♜♛♚]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN♘♗♖♕♞♝♜♛])?)[+#]?[!?]*$/;
   const ACTIVE_RE = /(^|\s)(a|a1t|active|current)(\s|$)/;
+  let scanCache = null; // найденный контейнер списка ходов, чтобы не обходить всё поддерево
   function scanRoundMoves() {
     const app = document.querySelector('.round__app');
     if (!app) return [];
+    if (scanCache && scanCache.isConnected && app.contains(scanCache)) {
+      const cached = [...scanCache.children].filter((el) => !el.children.length && SAN_RE.test(el.textContent.trim()));
+      if (cached.length) return cached;
+      scanCache = null;
+    }
     const byParent = new Map();
     for (const el of app.querySelectorAll('*')) {
       if (el.children.length || el.closest('.cg-wrap, .rclock, .ruser, .rcontrols, .result-wrap')) continue;
@@ -43,6 +49,7 @@
     }
     let best = [];
     for (const list of byParent.values()) if (list.length > best.length) best = list;
+    scanCache = best.length ? best[0].parentElement : null;
     return best;
   }
 
@@ -63,7 +70,11 @@
       );
       activeIdx = nodes.findIndex((n) => n.classList.contains('active'));
     }
-    const upto = activeIdx >= 0 ? activeIdx + 1 : nodes.length;
+    // activeIdx === -1 значит либо «стоим на стартовой позиции» (lichess подсвечивает
+    // отдельную кнопку начала партии), либо «разметку активного хода не нашли».
+    // Во втором случае показываем последнюю позицию, в первом — начальную.
+    const atStart = activeIdx < 0 && !!document.querySelector('.tview2 index.active, index.active, .a1t.active, [data-ply="0"].active');
+    const upto = activeIdx >= 0 ? activeIdx + 1 : atStart ? 0 : nodes.length;
     const moves = nodes.slice(0, upto).map((n) => cleanSan((n.querySelector('san') || n).textContent));
 
     const wrap = document.querySelector('.cg-wrap');
@@ -86,14 +97,26 @@
       players = { top: nameOf('.ruser-top'), bottom: nameOf('.ruser-bottom') };
       const res = document.querySelector('.round__app .result-wrap, .game__meta .status');
       resultText = res ? res.textContent.trim().replace(/\s+/g, ' ') : null;
-      const me = (document.body.dataset.user || '').toLowerCase();
-      const bottom = document.querySelector('.ruser-bottom');
-      const isPlayer =
-        (!!me && !!bottom && bottom.textContent.toLowerCase().includes(me)) ||
-        !!document.querySelector('.rcontrols .ricons, .rcontrols button.resign, .rcontrols .fbt.resign');
-      if (isPlayer) myColor = orientation;
-      const meta = document.querySelector('.game__meta');
-      rated = !!meta && /рейтинг|rated/i.test(meta.textContent);
+      // Ник игрока сравнивается точно: подстрока дала бы ложное совпадение
+      // для похожих ников (bob и bobby) на чужой партии.
+      const me = (document.body.dataset.user || '').trim().toLowerCase();
+      const nick = (sel) => {
+        const el = document.querySelector(sel + ' .user-link');
+        if (!el) return null;
+        const name = (el.textContent || '').trim().split(/\s|\(/)[0].toLowerCase();
+        return name || null;
+      };
+      const bottomNick = nick('.ruser-bottom');
+      const topNick = nick('.ruser-top');
+      const canResign = !!document.querySelector('.rcontrols .ricons, .rcontrols button.resign, .rcontrols .fbt.resign');
+      // Доску можно перевернуть, поэтому цвет берём из позиции своего ника,
+      // а не из ориентации: иначе после переворота «мой» цвет станет чужим.
+      if (me && bottomNick === me) myColor = orientation;
+      else if (me && topNick === me) myColor = orientation === 'white' ? 'black' : 'white';
+      else if (!me && canResign) myColor = orientation;
+      const setup = document.querySelector('.game__meta .setup, .game__meta');
+      const setupText = setup ? setup.textContent : '';
+      rated = /(^|[^а-яa-z])(рейтинговая|rated)([^а-яa-z]|$)/i.test(setupText) && !/(нерейтинговая|unrated|casual|товарищеская)/i.test(setupText);
       gameOver = !!document.querySelector('.round__app .result-wrap, .game__meta .status');
       const clock = document.querySelector('.rclock-bottom .time');
       if (clock) myTime = parseClock(clock.textContent);
@@ -318,6 +341,7 @@
       if (root) root.style.display = 'none';
       return;
     }
+    attachObserver();
     ensurePanel();
     root.style.display = '';
     const key = JSON.stringify([game.moves, game.viewing, game.total, game.orientation, game.myColor, game.gameOver, game.rated, game.gameId, game.resultText]);
@@ -335,7 +359,20 @@
     if (positionChanged) drawArrows([]);
   }
 
+  // Наблюдаем за конкретным приложением партии, если оно есть: на всём документе
+  // мутации идут непрерывно (часы, чат, анимация доски) и tick() крутится вхолостую.
   const observer = new MutationObserver(scheduleRead);
-  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class'] });
+  const observeOpts = { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class'] };
+  let observed = null;
+  function attachObserver() {
+    const target = document.querySelector('.round__app, main.analyse') || document.body;
+    if (target === observed) return;
+    observer.disconnect();
+    observer.observe(target, observeOpts);
+    observed = target;
+    // Переходы между страницами lichess делает без перезагрузки, поэтому следим и за body.
+    if (target !== document.body) observer.observe(document.body, { childList: true, subtree: true });
+  }
+  attachObserver();
   tick();
 })();
